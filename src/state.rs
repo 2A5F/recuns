@@ -14,7 +14,6 @@ pub struct State<I, D = ()> {
     states: Vec<Box<dyn Recuns<Input = I, Data = D>>>,
     queue: Vec<Box<dyn FnMut(&mut Self)>>,
     errors: Vec<Arc<dyn Error>>,
-    on_loop: Vec<Box<dyn FnMut(&mut Self)>>,
 }
 impl<I> State<I, ()> {
     #[inline]
@@ -28,7 +27,6 @@ impl<I> State<I, ()> {
             states: vec![],
             queue: vec![],
             errors: vec![],
-            on_loop: vec![],
         }
     }
 }
@@ -44,7 +42,6 @@ impl<I, D> State<I, D> {
             states: vec![],
             queue: vec![],
             errors: vec![],
-            on_loop: vec![],
         }
     }
     #[inline]
@@ -58,10 +55,6 @@ impl<I, D> State<I, D> {
     #[inline]
     fn pop(&mut self) -> Option<Box<dyn Recuns<Input = I, Data = D>>> {
         self.states.pop()
-    }
-    #[inline]
-    pub fn on_loop(&mut self, f: Box<dyn FnMut(&mut Self)>) {
-        self.on_loop.push(f)
     }
 }
 impl<I: Clone + 'static, D> State<I, D> {
