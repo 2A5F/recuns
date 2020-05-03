@@ -9,6 +9,18 @@ pub struct RecunsFnBox<F, Input, Data> {
     f: F,
     _i: std::marker::PhantomData<(Input, Data)>,
 }
+impl<F, Input, Data> RecunsFnBox<F, Input, Data>
+where
+    F: FnMut(Input, &mut Data) -> RecunsFlow<Input, Data>,
+{
+    #[inline]
+    pub fn new(f: F) -> Self {
+        Self {
+            f,
+            _i: std::marker::PhantomData,
+        }
+    }
+}
 impl<F, Input, Data> Recuns for RecunsFnBox<F, Input, Data>
 where
     F: FnMut(Input, &mut Data) -> RecunsFlow<Input, Data>,
@@ -33,9 +45,6 @@ where
 
     #[inline]
     fn recuns(self) -> Self::OutPut {
-        RecunsFnBox {
-            f: self,
-            _i: std::marker::PhantomData,
-        }
+        RecunsFnBox::new(self)
     }
 }

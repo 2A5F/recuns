@@ -5,11 +5,18 @@ pub use state::*;
 use std::error::*;
 use std::sync::*;
 
+#[cfg(test)]
+mod test_json;
+
 pub trait Recuns {
     type Input;
     type Data;
 
-    fn check(&mut self, input: Self::Input, data: &mut Self::Data) -> RecunsFlow<Self::Input, Self::Data>;
+    fn check(
+        &mut self,
+        input: Self::Input,
+        data: &mut Self::Data,
+    ) -> RecunsFlow<Self::Input, Self::Data>;
 }
 
 pub enum RecunsFlow<I, D> {
@@ -25,8 +32,6 @@ pub enum RecunsFlow<I, D> {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
-
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);

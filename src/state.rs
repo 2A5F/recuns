@@ -8,16 +8,19 @@ use std::sync::*;
 pub struct State<I, D = ()> {
     pub stop_when_err: bool,
     pub data: D,
-    pub next: Box<dyn FnMut() -> Option<I>>,
+    pub next: Box<dyn FnMut() -> Option<Result<I, Arc<dyn Error>>>>,
     cancel: Option<Box<dyn Fn() -> bool>>,
     finish: bool,
     states: Vec<Box<dyn Recuns<Input = I, Data = D>>>,
     queue: Vec<Box<dyn FnMut(&mut Self)>>,
-    errors: Vec<Arc<dyn Error>>,
+    pub errors: Vec<Arc<dyn Error>>,
 }
 impl<I> State<I, ()> {
     #[inline]
-    pub fn new_no_data(next: Box<dyn FnMut() -> Option<I>>, stop_when_err: bool) -> Self {
+    pub fn new_no_data(
+        next: Box<dyn FnMut() -> Option<Result<I, Arc<dyn Error>>>>,
+        stop_when_err: bool,
+    ) -> Self {
         Self {
             stop_when_err,
             data: (),
@@ -32,7 +35,11 @@ impl<I> State<I, ()> {
 }
 impl<I, D> State<I, D> {
     #[inline]
-    pub fn new(next: Box<dyn FnMut() -> Option<I>>, stop_when_err: bool, data: D) -> Self {
+    pub fn new(
+        next: Box<dyn FnMut() -> Option<Result<I, Arc<dyn Error>>>>,
+        stop_when_err: bool,
+        data: D,
+    ) -> Self {
         Self {
             stop_when_err,
             data,
@@ -118,7 +125,15 @@ impl<I: Clone + 'static, D> State<I, D> {
                 self.finish = true;
                 continue;
             }
-            let r = self.call(c.unwrap());
+            let c: Result<I, Arc<dyn Error>> = c.unwrap();
+            let c = match c {
+                Ok(c) => c,
+                Err(err) => {
+                    self.errors.push(err);
+                    return Err(self.errors.clone());
+                }
+            };
+            let r = self.call(c);
             if r.is_none() {
                 break;
             }
@@ -128,6 +143,12 @@ impl<I: Clone + 'static, D> State<I, D> {
         }
         Ok(())
     }
+    pub fn iter_loop<F, U>(&mut self, f: F) -> StateIter<'_, F, I, D>
+    where
+        F: FnMut(&mut Self) -> Option<U>,
+    {
+        StateIter::new(f, self)
+    }
 }
 impl<I, D: Debug> Debug for State<I, D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -136,5 +157,74 @@ impl<I, D: Debug> Debug for State<I, D> {
             .field("data", &self.data)
             .field("data", &self.data)
             .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct StateIter<'a, F, I, D = ()> {
+    f: F,
+    s: &'a mut State<I, D>,
+    yield_: bool,
+}
+impl<'a, F, I, D, U> StateIter<'a, F, I, D>
+where
+    F: FnMut(&mut State<I, D>) -> Option<U>,
+{
+    pub fn new(f: F, s: &'a mut State<I, D>) -> Self {
+        Self {
+            f,
+            s,
+            yield_: false,
+        }
+    }
+}
+impl<'a, F, I: Clone + 'static, D, U> Iterator for StateIter<'a, F, I, D>
+where
+    F: FnMut(&mut State<I, D>) -> Option<U>,
+{
+    type Item = U;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref cancel) = self.s.cancel {
+                if cancel() {
+                    return None;
+                }
+            }
+            if !self.yield_ {
+                let r: Option<U> = (self.f)(self.s);
+                if let Some(v) = r {
+                    self.yield_ = true;
+                    return Some(v);
+                }
+            }
+            self.yield_ = false;
+            if !self.s.queue.is_empty() {
+                let mut q = self.s.queue.pop().unwrap();
+                q(self.s);
+                continue;
+            }
+            if self.s.finish {
+                break;
+            }
+            let c = (self.s.next)();
+            if c.is_none() {
+                self.s.finish = true;
+                continue;
+            }
+            let c: Result<I, Arc<dyn Error>> = c.unwrap();
+            let c = match c {
+                Ok(c) => c,
+                Err(err) => {
+                    self.s.errors.push(err);
+                    return None;
+                }
+            };
+            let r = self.s.call(c);
+            if r.is_none() {
+                break;
+            }
+        }
+        None
     }
 }
