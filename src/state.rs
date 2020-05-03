@@ -146,11 +146,11 @@ fn call<'a, I: Clone + 'a, D>(s: &mut State<'a, I, D>, input: I) -> Option<()> {
 }
 
 macro_rules! do_loop {
-    { $s:ident ; $data:expr, $stop_when_err:expr, $next:expr , $b:block } => {
+    { $s:ident ; $data:expr, $stop_when_err:expr, $next:expr ; $($b:block)? } => {
         let mut $s: State<'a, I, D> = State::new($stop_when_err, $data);
         let mut finish = false;
         loop {
-            $b
+            $($b;)?
 
             if !$s.queue.is_empty() {
                 let mut q = $s.queue.pop().unwrap();
@@ -195,14 +195,54 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + 'a, D>(
     mut on_loop: impl FnMut(&mut State<I, D>),
 ) -> RecunsResultErrs<()> {
     do_loop! {
-        s;
-        data, stop_when_err, next,
+        s ;
+        data, stop_when_err, next ;
         {
             if cancel() {
                 return Ok(());
             }
             on_loop(&mut s);
         }
+    }
+}
+pub fn do_loop_on_loop<'a, I: Clone + 'a, D>(
+    data: D,
+    stop_when_err: bool,
+    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+    mut on_loop: impl FnMut(&mut State<I, D>),
+) -> RecunsResultErrs<()> {
+    do_loop! {
+        s ;
+        data, stop_when_err, next ;
+        {
+            on_loop(&mut s);
+        }
+    }
+}
+pub fn do_loop_cancel<'a, I: Clone + 'a, D>(
+    data: D,
+    stop_when_err: bool,
+    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+    mut cancel: impl FnMut() -> bool,
+) -> RecunsResultErrs<()> {
+    do_loop! {
+        s ;
+        data, stop_when_err, next ;
+        {
+            if cancel() {
+                return Ok(());
+            }
+        }
+    }
+}
+pub fn do_loop<'a, I: Clone + 'a, D>(
+    data: D,
+    stop_when_err: bool,
+    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+) -> RecunsResultErrs<()> {
+    do_loop! {
+        s ;
+        data, stop_when_err, next ;
     }
 }
 
