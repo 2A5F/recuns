@@ -18,6 +18,8 @@ pub trait Recuns {
         data: &mut Self::Data,
     ) -> RecunsFlow<Self::Input, Self::Data>;
 }
+pub type RecunsResult<T> = Result<T, Arc<dyn Error>>;
+pub type RecunsResultErrs<T> = Result<T, Vec<Arc<dyn Error>>>;
 
 pub enum RecunsFlow<I, D> {
     None,
