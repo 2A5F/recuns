@@ -146,8 +146,9 @@ fn call<'a, I: Clone + 'a, D>(s: &mut State<'a, I, D>, input: I) -> Option<()> {
 }
 
 macro_rules! do_loop {
-    { $s:ident ; $data:expr, $stop_when_err:expr, $next:expr ; $($b:block)? } => {
+    { $s:ident ; $data:expr, $root:expr, $stop_when_err:expr, $next:expr ; $($b:block)? } => {
         let mut $s: State<'a, I, D> = State::new($stop_when_err, $data);
+        $s.push(Box::new($root));
         let mut finish = false;
         loop {
             $($b;)?
@@ -189,6 +190,7 @@ macro_rules! do_loop {
 }
 pub fn do_loop_cancel_on_loop<'a, I: Clone + 'a, D>(
     data: D,
+    root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     mut next: impl FnMut() -> Option<RecunsResult<I>>,
     mut cancel: impl FnMut() -> bool,
@@ -196,7 +198,7 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + 'a, D>(
 ) -> RecunsResultErrs<()> {
     do_loop! {
         s ;
-        data, stop_when_err, next ;
+        data, root, stop_when_err, next ;
         {
             if cancel() {
                 return Ok(());
@@ -207,13 +209,14 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + 'a, D>(
 }
 pub fn do_loop_on_loop<'a, I: Clone + 'a, D>(
     data: D,
+    root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     mut next: impl FnMut() -> Option<RecunsResult<I>>,
     mut on_loop: impl FnMut(&mut State<I, D>),
 ) -> RecunsResultErrs<()> {
     do_loop! {
         s ;
-        data, stop_when_err, next ;
+        data, root, stop_when_err, next ;
         {
             on_loop(&mut s);
         }
@@ -221,13 +224,14 @@ pub fn do_loop_on_loop<'a, I: Clone + 'a, D>(
 }
 pub fn do_loop_cancel<'a, I: Clone + 'a, D>(
     data: D,
+    root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     mut next: impl FnMut() -> Option<RecunsResult<I>>,
     mut cancel: impl FnMut() -> bool,
 ) -> RecunsResultErrs<()> {
     do_loop! {
         s ;
-        data, stop_when_err, next ;
+        data, root, stop_when_err, next ;
         {
             if cancel() {
                 return Ok(());
@@ -237,13 +241,13 @@ pub fn do_loop_cancel<'a, I: Clone + 'a, D>(
 }
 pub fn do_loop<'a, I: Clone + 'a, D>(
     data: D,
-    root: impl Recuns<Data = D, Input = I> + 'static,
+    root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     mut next: impl FnMut() -> Option<RecunsResult<I>>,
 ) -> RecunsResultErrs<()> {
     // do_loop! {
     //     s ;
-    //     data, stop_when_err, next ;
+    //     data, root, stop_when_err, next ;
     // }
     let mut s: State<'a, I, D> = State::new(stop_when_err, data);
     s.push(Box::new(root));
@@ -282,6 +286,84 @@ pub fn do_loop<'a, I: Clone + 'a, D>(
         return Err(s.errors.clone());
     }
     Ok(())
+}
+
+pub fn do_iter<'a, I: Clone + 'a, D: 'a, U>(
+    data: D,
+    root: impl Recuns<Data = D, Input = I> + 'a,
+    stop_when_err: bool,
+    mut next: impl 'a + FnMut() -> Option<RecunsResult<I>>,
+    mut yields: impl 'a + FnMut(&D) -> Option<U>,
+) -> impl 'a + Iterator<Item = U> {
+    let mut s: State<'a, I, D> = State::new(stop_when_err, data);
+    s.push(Box::new(root));
+    let mut finish = false;
+    let mut is_yield = false;
+    let i = DoLoopIter::new(move || -> Option<U> {
+        loop {
+            if !is_yield {
+                let r = yields(&s.data);
+                if let Some(v) = r {
+                    is_yield = true;
+                    return Some(v);
+                }
+            }
+            is_yield = false;
+
+            if !s.queue.is_empty() {
+                let mut q = s.queue.pop().unwrap();
+                q(&mut s);
+                continue;
+            }
+
+            if finish {
+                break;
+            }
+
+            let c = next();
+            if c.is_none() {
+                finish = true;
+                continue;
+            }
+            let c: RecunsResult<I> = c.unwrap();
+            let c = match c {
+                Ok(c) => c,
+                Err(err) => {
+                    s.errors.push(err);
+                    return None;
+                }
+            };
+
+            let r = call(&mut s, c);
+            if r.is_none() {
+                break;
+            }
+        }
+        None
+    });
+    i
+}
+
+struct DoLoopIter<F> {
+    f: F,
+}
+impl<F, U> DoLoopIter<F>
+where
+    F: FnMut() -> Option<U>,
+{
+    #[inline]
+    pub fn new(f: F) -> Self {
+        Self { f }
+    }
+}
+impl<F, U> Iterator for DoLoopIter<F>
+where
+    F: FnMut() -> Option<U>,
+{
+    type Item = U;
+    fn next(&mut self) -> Option<Self::Item> {
+        (self.f)()
+    }
 }
 
 //     pub fn do_loop(&mut self) -> Result<(), Vec<Arc<dyn Error>>> {
