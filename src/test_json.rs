@@ -9,10 +9,18 @@ mod token {
 
     struct TokenData {}
 
-    fn tokens(mut code: Box<Chars>) {
-        let mut state = State::<char, _>::new(false, TokenData {});
-        //state.call(input)
+    #[test]
+    fn test_tokens() {
+        let code = "asd";
+        tokens(code.chars());
+    }
+    fn tokens(mut code: Chars) {
+        let r = root.recuns();
+        let r = do_loop((), r, true, || code.next().map(|v| Ok(v)));
+        println!("{:?}", r);
     }
 
-    fn root() {}
+    fn root(inp: char, data: &mut ()) -> RecunsFlow<char, ()> {
+        todo!()
+    }
 }

@@ -237,13 +237,51 @@ pub fn do_loop_cancel<'a, I: Clone + 'a, D>(
 }
 pub fn do_loop<'a, I: Clone + 'a, D>(
     data: D,
+    root: impl Recuns<Data = D, Input = I> + 'static,
     stop_when_err: bool,
     mut next: impl FnMut() -> Option<RecunsResult<I>>,
 ) -> RecunsResultErrs<()> {
-    do_loop! {
-        s ;
-        data, stop_when_err, next ;
+    // do_loop! {
+    //     s ;
+    //     data, stop_when_err, next ;
+    // }
+    let mut s: State<'a, I, D> = State::new(stop_when_err, data);
+    s.push(Box::new(root));
+    let mut finish = false;
+    loop {
+        if !s.queue.is_empty() {
+            let mut q = s.queue.pop().unwrap();
+            q(&mut s);
+            continue;
+        }
+
+        if finish {
+            break;
+        }
+
+        let c = next();
+        if c.is_none() {
+            finish = true;
+            continue;
+        }
+        let c: RecunsResult<I> = c.unwrap();
+        let c = match c {
+            Ok(c) => c,
+            Err(err) => {
+                s.errors.push(err);
+                return Err(s.errors.clone());
+            }
+        };
+
+        let r = call(&mut s, c);
+        if r.is_none() {
+            break;
+        }
     }
+    if !s.errors.is_empty() {
+        return Err(s.errors.clone());
+    }
+    Ok(())
 }
 
 //     pub fn do_loop(&mut self) -> Result<(), Vec<Arc<dyn Error>>> {
