@@ -1,4 +1,5 @@
 use crate::*;
+use std::collections::VecDeque;
 use std::error::*;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
@@ -298,25 +299,38 @@ pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     Ok(())
 }
 
-pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U>(
+pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     errors: &'a mut Vec<Arc<dyn Error>>,
     mut next: impl 'a + FnMut() -> Option<RecunsResult<I>>,
-    mut yields: impl 'a + FnMut(&D) -> Option<U>,
+    mut yields: impl 'a + FnMut(&mut D) -> Option<VecDeque<U>>,
 ) -> impl 'a + Iterator<Item = U> {
     let mut s: State<'_, '_, I, D> = State::new(stop_when_err, data, errors);
     s.push(Box::new(root));
     let mut finish = false;
     let mut is_yield = false;
+    let mut yield_val: VecDeque<U> = VecDeque::new();
     let i = DoLoopIter::new(move || -> Option<U> {
         loop {
-            if !is_yield {
-                let r = yields(&s.data);
-                if let Some(v) = r {
-                    is_yield = true;
+            if !yield_val.is_empty() {
+                let rv = yield_val.pop_front();
+                if let Some(v) = rv {
                     return Some(v);
+                }
+            }
+            if !is_yield {
+                let r = yields(&mut s.data);
+                if let Some(mut v) = r {
+                    is_yield = true;
+                    let rv = v.pop_front();
+                    if !v.is_empty() {
+                        yield_val = v;
+                    }
+                    if let Some(v) = rv {
+                        return Some(v);
+                    }
                 }
             }
             is_yield = false;

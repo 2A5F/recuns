@@ -9,8 +9,11 @@ mod token {
     use batch_oper::*;
     use lazy_static::*;
     use regex::*;
+    use std::collections::VecDeque;
+    use std::iter::FromIterator;
     use std::str::*;
 
+    #[derive(Debug, Clone, PartialEq)]
     enum Token {
         Str(String),
         Num(f64),
@@ -51,7 +54,14 @@ mod token {
             true,
             &mut errors,
             || code.next().map(|v| Ok(v)),
-            |d| Some(()),
+            |d| {
+                if d.tokens.is_empty() {
+                    return None;
+                }
+                let y = VecDeque::from_iter(d.tokens.iter().cloned());
+                d.tokens = vec![];
+                Some(y)
+            },
         );
         let r = r.collect::<Vec<_>>();
         println!("{:?}", r);
