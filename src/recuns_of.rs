@@ -11,7 +11,7 @@ pub struct RecunsFnBox<F, Input, Data> {
 }
 impl<F, Input, Data> RecunsFnBox<F, Input, Data>
 where
-    F: FnMut(Input, &mut Data) -> RecunsFlow<Input, Data>,
+    F: FnMut(Input, &mut Data, bool) -> RecunsFlow<Input, Data>,
 {
     #[inline]
     pub fn new(f: F) -> Self {
@@ -23,7 +23,7 @@ where
 }
 impl<F, Input, Data> Recuns for RecunsFnBox<F, Input, Data>
 where
-    F: FnMut(Input, &mut Data) -> RecunsFlow<Input, Data>,
+    F: FnMut(Input, &mut Data, bool) -> RecunsFlow<Input, Data>,
 {
     type Input = Input;
     type Data = Data;
@@ -33,13 +33,14 @@ where
         &mut self,
         input: Self::Input,
         data: &mut Self::Data,
+        eof: bool,
     ) -> RecunsFlow<Self::Input, Self::Data> {
-        (self.f)(input, data)
+        (self.f)(input, data, eof)
     }
 }
 impl<Input, F, Data> RecunsOfFn<Input, Data> for F
 where
-    F: FnMut(Input, &mut Data) -> RecunsFlow<Input, Data>,
+    F: FnMut(Input, &mut Data, bool) -> RecunsFlow<Input, Data>,
 {
     type OutPut = RecunsFnBox<F, Input, Data>;
 

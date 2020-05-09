@@ -104,13 +104,13 @@ impl<'a, 'b, I, D> State<'a, 'b, I, D> {
 //         Some(())
 //     }
 
-fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I) -> Option<()> {
+fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I, eof: bool) -> Option<()> {
     let r = s.states.last_mut()?;
-    let r = r.check(input.clone(), &mut s.data);
+    let r = r.check(input.clone(), &mut s.data, eof);
 
     match r {
         RecunsFlow::ReDo => s.queue.push(Box::new(move |this| {
-            call(this, input.clone());
+            call(this, input.clone(), eof);
         })),
         RecunsFlow::End => unsafe {
             s.pop();
@@ -118,7 +118,7 @@ fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I) -> Opti
         RecunsFlow::Call(f) => {
             s.push(f);
             s.queue.push(Box::new(move |this| {
-                call(this, input.clone());
+                call(this, input.clone(), eof);
             }))
         }
         RecunsFlow::CallNext(f) => s.push(f),
@@ -126,7 +126,7 @@ fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I) -> Opti
             s.pop();
             s.push(f);
             s.queue.push(Box::new(move |this| {
-                call(this, input.clone());
+                call(this, input.clone(), eof);
             }))
         },
         RecunsFlow::MovNext(f) => unsafe {
@@ -167,6 +167,10 @@ macro_rules! do_loop {
             let c = $next();
             if c.is_none() {
                 finish = true;
+                let r = call(&mut $s, Default::default(), true);
+                if r.is_none() {
+                    break;
+                }
                 continue;
             }
             let c: RecunsResult<I> = c.unwrap();
@@ -178,7 +182,7 @@ macro_rules! do_loop {
                 }
             };
 
-            let r = call(&mut $s, c);
+            let r = call(&mut $s, c, false);
             if r.is_none() {
                 break;
             }
@@ -189,7 +193,7 @@ macro_rules! do_loop {
         Ok(())
     };
 }
-pub fn do_loop_cancel_on_loop<'a, I: Clone + 'a, D>(
+pub fn do_loop_cancel_on_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
@@ -208,7 +212,7 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + 'a, D>(
         }
     }
 }
-pub fn do_loop_on_loop<'a, I: Clone + 'a, D>(
+pub fn do_loop_on_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
@@ -223,7 +227,7 @@ pub fn do_loop_on_loop<'a, I: Clone + 'a, D>(
         }
     }
 }
-pub fn do_loop_cancel<'a, I: Clone + 'a, D>(
+pub fn do_loop_cancel<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
@@ -240,7 +244,7 @@ pub fn do_loop_cancel<'a, I: Clone + 'a, D>(
         }
     }
 }
-pub fn do_loop<'a, I: Clone + 'a, D>(
+pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
@@ -268,6 +272,10 @@ pub fn do_loop<'a, I: Clone + 'a, D>(
         let c = next();
         if c.is_none() {
             finish = true;
+            let r = call(&mut s, Default::default(), true);
+            if r.is_none() {
+                break;
+            }
             continue;
         }
         let c: RecunsResult<I> = c.unwrap();
@@ -279,7 +287,7 @@ pub fn do_loop<'a, I: Clone + 'a, D>(
             }
         };
 
-        let r = call(&mut s, c);
+        let r = call(&mut s, c, false);
         if r.is_none() {
             break;
         }
@@ -290,7 +298,7 @@ pub fn do_loop<'a, I: Clone + 'a, D>(
     Ok(())
 }
 
-pub fn do_iter<'a, I: Clone + 'a, D: 'a, U>(
+pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
@@ -326,6 +334,10 @@ pub fn do_iter<'a, I: Clone + 'a, D: 'a, U>(
             let c = next();
             if c.is_none() {
                 finish = true;
+                let r = call(&mut s, Default::default(), false);
+                if r.is_none() {
+                    break;
+                }
                 continue;
             }
             let c: RecunsResult<I> = c.unwrap();
@@ -337,7 +349,7 @@ pub fn do_iter<'a, I: Clone + 'a, D: 'a, U>(
                 }
             };
 
-            let r = call(&mut s, c);
+            let r = call(&mut s, c, false);
             if r.is_none() {
                 break;
             }
@@ -366,6 +378,11 @@ where
     type Item = U;
     fn next(&mut self) -> Option<Self::Item> {
         (self.f)()
+    }
+}
+impl<F> Debug for DoLoopIter<F> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DoLoopIter").field("f", &"...").finish()
     }
 }
 
