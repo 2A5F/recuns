@@ -17,6 +17,8 @@ mod token {
     enum Token {
         Str(String),
         Num(f64),
+        Bool(bool),
+        Null,
         ArrS,
         ArrE,
         ObjS,
@@ -109,5 +111,14 @@ mod token {
             .into();
         };
         None
+    }
+    fn check_string(first: char, sp: usize) -> Option<Flow> {
+        todo!()
+    }
+    fn check_word(first: char, sp: usize) -> Option<Flow> {
+        todo!()
+    }
+    fn check_symbol(first: char, sp: usize) -> Option<Flow> {
+        todo!()
     }
 }
