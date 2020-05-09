@@ -5,22 +5,22 @@ use std::fmt::{Debug, Formatter};
 use std::sync::*;
 
 // #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct State<'a, I, D = ()> {
+pub struct State<'a, 'b, I, D = ()> {
     pub stop_when_err: bool,
 
     pub data: D,
 
     pub states: Vec<Box<dyn 'a + Recuns<Input = I, Data = D>>>,
     pub queue: Vec<Box<dyn 'a + FnMut(&mut Self)>>,
-    pub errors: Vec<Arc<dyn Error>>,
+    pub errors: &'b mut Vec<Arc<dyn Error>>,
     // pub cancel: Option<Box<dyn 'a + Fn() -> bool>>,
     // pub finish: bool,
     // pub next: Box<dyn 'a + FnMut() -> Option<Result<I, Arc<dyn Error>>>>,
     // pub on_loop: Option<Box<dyn FnMut(&mut Self)>>,
 }
-impl<'a, I> State<'a, I, ()> {
+impl<'a, 'b, I> State<'a, 'b, I, ()> {
     #[inline]
-    pub fn new_no_data(stop_when_err: bool) -> Self {
+    pub fn new_no_data(stop_when_err: bool, errors: &'b mut Vec<Arc<dyn Error>>) -> Self {
         Self {
             stop_when_err,
 
@@ -28,7 +28,7 @@ impl<'a, I> State<'a, I, ()> {
 
             states: vec![],
             queue: vec![],
-            errors: vec![],
+            errors,
             // on_loop: None,
             // next,
             // cancel: None,
@@ -36,9 +36,9 @@ impl<'a, I> State<'a, I, ()> {
         }
     }
 }
-impl<'a, I, D> State<'a, I, D> {
+impl<'a, 'b, I, D> State<'a, 'b, I, D> {
     #[inline]
-    pub fn new(stop_when_err: bool, data: D) -> Self {
+    pub fn new(stop_when_err: bool, data: D, errors: &'b mut Vec<Arc<dyn Error>>) -> Self {
         Self {
             stop_when_err,
 
@@ -46,7 +46,7 @@ impl<'a, I, D> State<'a, I, D> {
 
             states: vec![],
             queue: vec![],
-            errors: vec![],
+            errors,
             // on_loop: None,
             // next,
             // cancel: None,
@@ -104,7 +104,7 @@ impl<'a, I, D> State<'a, I, D> {
 //         Some(())
 //     }
 
-fn call<'a, I: Clone + 'a, D>(s: &mut State<'a, I, D>, input: I) -> Option<()> {
+fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I) -> Option<()> {
     let r = s.states.last_mut()?;
     let r = r.check(input.clone(), &mut s.data);
 
@@ -147,7 +147,8 @@ fn call<'a, I: Clone + 'a, D>(s: &mut State<'a, I, D>, input: I) -> Option<()> {
 
 macro_rules! do_loop {
     { $s:ident ; $data:expr, $root:expr, $stop_when_err:expr, $next:expr ; $($b:block)? } => {
-        let mut $s: State<'a, I, D> = State::new($stop_when_err, $data);
+        let mut errors = vec![];
+        let mut $s: State<'a, '_, I, D> = State::new($stop_when_err, $data, &mut errors);
         $s.push(Box::new($root));
         let mut finish = false;
         loop {
@@ -249,7 +250,8 @@ pub fn do_loop<'a, I: Clone + 'a, D>(
     //     s ;
     //     data, root, stop_when_err, next ;
     // }
-    let mut s: State<'a, I, D> = State::new(stop_when_err, data);
+    let mut errors = vec![];
+    let mut s: State<'_, '_, I, D> = State::new(stop_when_err, data, &mut errors);
     s.push(Box::new(root));
     let mut finish = false;
     loop {
@@ -292,10 +294,11 @@ pub fn do_iter<'a, I: Clone + 'a, D: 'a, U>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
+    errors: &'a mut Vec<Arc<dyn Error>>,
     mut next: impl 'a + FnMut() -> Option<RecunsResult<I>>,
     mut yields: impl 'a + FnMut(&D) -> Option<U>,
 ) -> impl 'a + Iterator<Item = U> {
-    let mut s: State<'a, I, D> = State::new(stop_when_err, data);
+    let mut s: State<'_, '_, I, D> = State::new(stop_when_err, data, errors);
     s.push(Box::new(root));
     let mut finish = false;
     let mut is_yield = false;
