@@ -1,8 +1,8 @@
 pub mod recuns_of;
 mod state;
+use anyhow::Error;
 pub use recuns_of::*;
 pub use state::*;
-use std::error::*;
 use std::sync::*;
 
 #[cfg(test)]
@@ -19,8 +19,8 @@ pub trait Recuns {
         eof: bool,
     ) -> RecunsFlow<Self::Input, Self::Data>;
 }
-pub type RecunsResult<T> = Result<T, Arc<dyn Error>>;
-pub type RecunsResultErrs<T> = Result<T, Vec<Arc<dyn Error>>>;
+pub type RecunsResult<T> = Result<T, Arc<Error>>;
+pub type RecunsResultErrs<T> = Result<T, Vec<Arc<Error>>>;
 
 pub enum RecunsFlow<I, D> {
     None,
@@ -30,7 +30,19 @@ pub enum RecunsFlow<I, D> {
     CallNext(Box<dyn Recuns<Input = I, Data = D>>),
     Mov(Box<dyn Recuns<Input = I, Data = D>>),
     MovNext(Box<dyn Recuns<Input = I, Data = D>>),
-    Err(Arc<dyn Error>),
+    Err(Arc<Error>),
+}
+impl<I, D> From<Arc<Error>> for RecunsFlow<I, D> {
+    #[inline]
+    fn from(e: Arc<Error>) -> Self {
+        Self::Err(e)
+    }
+}
+impl<I, D> From<Error> for RecunsFlow<I, D> {
+    #[inline]
+    fn from(e: Error) -> Self {
+        Self::Err(Arc::new(e))
+    }
 }
 impl<I, D> RecunsFlow<I, D> {
     #[inline]

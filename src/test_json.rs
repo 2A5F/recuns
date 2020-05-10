@@ -1,4 +1,4 @@
-#![allow(unused_variables, unused_mut, unused_imports, dead_code)]
+// #![allow(unused_variables, unused_mut, unused_imports, dead_code)]
 use crate::*;
 
 fn json() {}
@@ -6,12 +6,15 @@ fn json() {}
 mod token {
     #![allow(non_upper_case_globals)]
     use crate::*;
+    use anyhow::Error;
     use batch_oper::*;
     use lazy_static::*;
     use regex::*;
     use std::collections::VecDeque;
     use std::iter::FromIterator;
+    use std::ops::*;
     use std::str::*;
+    use thiserror::*;
 
     #[derive(Debug, Clone, PartialEq)]
     enum Token {
@@ -25,6 +28,22 @@ mod token {
         ObjE,
         Comma,
         Colon,
+    }
+
+    #[derive(Error, Debug)]
+    enum TokenError {
+        #[error("Token is not a legal number at {}..{}", .0.start, .0.end)]
+        NotNum(Range<usize>),
+        #[error("Need '{}' but find EOF at {}..{}", .0, .1, .1)]
+        NeedButEof(char, usize),
+        #[error("Need <{}> but find EOF at {}..{}", .0, .1, .1)]
+        NeedSomeButEof(String, usize),
+        #[error("Unexpected EOF at {}..{}", .0, .0)]
+        Eof(usize),
+        #[error("Special characters need to be escaped at {}..{}", .0, .0)]
+        NeedEscape(usize),
+        #[error("Illegal Escape symbol {} at {}..{}", .0, .1, .1)]
+        IllegalEscape(char, usize),
     }
 
     struct TokenData {
@@ -41,7 +60,7 @@ mod token {
 
     #[test]
     fn test_tokens() {
-        let code = "\"as\\nd\"";
+        let code = "\"asd\\";
         tokens(code.chars());
     }
     fn tokens(mut code: Chars) {
@@ -72,9 +91,13 @@ mod token {
         );
         let r = r.collect::<Vec<_>>();
         println!("{:?}", r);
+        println!("{:?}", errors);
     }
 
     fn root(inp: char, data: &mut TokenData, eof: bool) -> Flow {
+        if eof || inp == '\0' {
+            return RecunsFlow::End;
+        }
         let sp = data.save();
         try_ret!(check_number(inp, sp));
         try_ret!(check_string(inp, sp));
@@ -100,36 +123,43 @@ mod token {
             return move |inp, data: &mut TokenData, eof| -> Flow {
                 if eof || inp == '\0' || !is_num(inp) {
                     let s = strs.iter().collect::<String>();
+                    if !number_regex.is_match(&*s) {
+                        let np = data.save();
+                        return Error::new(TokenError::NotNum(sp..np)).into();
+                    }
                     let f = s.parse::<f64>();
                     match f {
                         Ok(f) => {
                             data.tokens.push(Token::Num(f));
+                            return RecunsFlow::EndReDo;
                         }
-                        Err(e) => {
-                            return RecunsFlow::Err(Arc::new(e));
+                        Err(_) => {
+                            let np = data.save();
+                            return Error::new(TokenError::NotNum(sp..np)).into();
                         }
                     }
                 } else {
                     strs.push(inp);
                     return RecunsFlow::None;
                 }
-                RecunsFlow::End
             }
             .rfcall_next()
             .into();
         }
         None
     }
-    fn check_string(first: char, sp: usize) -> Option<Flow> {
+    fn check_string(first: char, _: usize) -> Option<Flow> {
         if first == '"' {
             let mut strs = vec![];
             return move |inp, data: &mut TokenData, eof| -> Flow {
                 if eof || inp == '\0' {
-                    //todo error
+                    let np = data.save();
+                    return Error::new(TokenError::NeedButEof('"', np)).into();
                 }
                 //                  \b   \f
                 if bop!(|| inp; ==; '', '', '\n', '\r', '\t') {
-                    //todo error
+                    let np = data.save();
+                    return Error::new(TokenError::NeedEscape(np)).into();
                 }
                 if inp == '"' {
                     let s: String = strs.iter().collect();
@@ -145,7 +175,7 @@ mod token {
         }
         None
     }
-    fn check_escape(first: char, sp: usize, strs: *mut Vec<char>) -> Option<Flow> {
+    fn check_escape(first: char, _: usize, strs: *mut Vec<char>) -> Option<Flow> {
         fn doesc(c: char) -> char {
             match c {
                 '\\' | '"' | '/' => c,
@@ -159,14 +189,24 @@ mod token {
         }
         if first == '\\' {
             return move |inp, data: &mut TokenData, eof| -> Flow {
+                if eof || inp == '\0' {
+                    let np = data.save();
+                    return Error::new(TokenError::NeedSomeButEof("Escape Character".into(), np))
+                        .into();
+                }
                 if bop!(|| inp; ==; '\\', '"', '/', 'b', 'f', 'n', 'r', 't') {
                     unsafe { &mut *strs }.push(doesc(inp));
                     return RecunsFlow::End;
                 } else if inp == 'u' {
                     let mut uc = vec![];
                     return move |inp: char, data: &mut TokenData, eof| -> Flow {
+                        if eof || inp == '\0' {
+                            let np = data.save();
+                            return Error::new(TokenError::Eof(np)).into();
+                        }
                         if !inp.is_ascii_hexdigit() {
-                            //todo error
+                            let np = data.save();
+                            return Error::new(TokenError::IllegalEscape(inp, np)).into();
                         }
                         uc.push(inp);
                         if uc.len() == 4 {
@@ -180,9 +220,9 @@ mod token {
                     }
                     .rfmov_next();
                 } else {
-                    //todo error
+                    let np = data.save();
+                    return Error::new(TokenError::IllegalEscape(inp, np)).into();
                 }
-                RecunsFlow::None
             }
             .rfcall_next()
             .into();

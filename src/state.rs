@@ -1,9 +1,9 @@
 use crate::*;
 use std::collections::VecDeque;
-use std::error::*;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::sync::*;
+use anyhow::Error;
 
 // #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct State<'a, 'b, I, D = ()> {
@@ -13,15 +13,15 @@ pub struct State<'a, 'b, I, D = ()> {
 
     pub states: Vec<Box<dyn 'a + Recuns<Input = I, Data = D>>>,
     pub queue: Vec<Box<dyn 'a + FnMut(&mut Self)>>,
-    pub errors: &'b mut Vec<Arc<dyn Error>>,
+    pub errors: &'b mut Vec<Arc<Error>>,
     // pub cancel: Option<Box<dyn 'a + Fn() -> bool>>,
     // pub finish: bool,
-    // pub next: Box<dyn 'a + FnMut() -> Option<Result<I, Arc<dyn Error>>>>,
+    // pub next: Box<dyn 'a + FnMut() -> Option<Result<I, Arc<Error>>>>,
     // pub on_loop: Option<Box<dyn FnMut(&mut Self)>>,
 }
 impl<'a, 'b, I> State<'a, 'b, I, ()> {
     #[inline]
-    pub fn new_no_data(stop_when_err: bool, errors: &'b mut Vec<Arc<dyn Error>>) -> Self {
+    pub fn new_no_data(stop_when_err: bool, errors: &'b mut Vec<Arc<Error>>) -> Self {
         Self {
             stop_when_err,
 
@@ -39,7 +39,7 @@ impl<'a, 'b, I> State<'a, 'b, I, ()> {
 }
 impl<'a, 'b, I, D> State<'a, 'b, I, D> {
     #[inline]
-    pub fn new(stop_when_err: bool, data: D, errors: &'b mut Vec<Arc<dyn Error>>) -> Self {
+    pub fn new(stop_when_err: bool, data: D, errors: &'b mut Vec<Arc<Error>>) -> Self {
         Self {
             stop_when_err,
 
@@ -307,7 +307,7 @@ pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
-    errors: &'a mut Vec<Arc<dyn Error>>,
+    errors: &'a mut Vec<Arc<Error>>,
     mut next: impl 'a + FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut yields: impl 'a + FnMut(&mut D) -> Option<VecDeque<U>>,
 ) -> impl 'a + Iterator<Item = U> {
@@ -404,7 +404,7 @@ impl<F> Debug for DoLoopIter<F> {
     }
 }
 
-//     pub fn do_loop(&mut self) -> Result<(), Vec<Arc<dyn Error>>> {
+//     pub fn do_loop(&mut self) -> Result<(), Vec<Arc<Error>>> {
 //         let this = unsafe { &mut *(self as *mut _) };
 //         loop {
 //             if let Some(ref cancel) = self.cancel {
@@ -428,7 +428,7 @@ impl<F> Debug for DoLoopIter<F> {
 //                 self.finish = true;
 //                 continue;
 //             }
-//             let c: Result<I, Arc<dyn Error>> = c.unwrap();
+//             let c: Result<I, Arc<Error>> = c.unwrap();
 //             let c = match c {
 //                 Ok(c) => c,
 //                 Err(err) => {
@@ -519,7 +519,7 @@ impl<F> Debug for DoLoopIter<F> {
 //                 self.s.finish = true;
 //                 continue;
 //             }
-//             let c: Result<I, Arc<dyn Error>> = c.unwrap();
+//             let c: Result<I, Arc<Error>> = c.unwrap();
 //             let c = match c {
 //                 Ok(c) => c,
 //                 Err(err) => {
