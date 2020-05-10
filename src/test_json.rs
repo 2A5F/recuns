@@ -41,7 +41,7 @@ mod token {
 
     #[test]
     fn test_tokens() {
-        let code = "123";
+        let code = "\"as\\nd\"";
         tokens(code.chars());
     }
     fn tokens(mut code: Chars) {
@@ -76,7 +76,10 @@ mod token {
 
     fn root(inp: char, data: &mut TokenData, eof: bool) -> Flow {
         let sp = data.save();
-        check_number(inp, sp).unwrap_or(RecunsFlow::None)
+        try_ret!(check_number(inp, sp));
+        try_ret!(check_string(inp, sp));
+        //todo error
+        RecunsFlow::None
     }
 
     lazy_static! {
@@ -129,12 +132,11 @@ mod token {
                     //todo error
                 }
                 if inp == '"' {
-                    //todo end
+                    let s: String = strs.iter().collect();
+                    data.tokens.push(Token::Str(s));
+                    return RecunsFlow::End;
                 }
-                try_ret!(check_escape(inp, data.save(), {
-                    let strs: *mut Vec<char> = &mut strs;
-                    move |c| unsafe { &mut *strs }.push(c)
-                }));
+                try_ret!(check_escape(inp, data.save(), &mut strs));
                 strs.push(inp);
                 RecunsFlow::None
             }
@@ -143,11 +145,22 @@ mod token {
         }
         None
     }
-    fn check_escape(first: char, sp: usize, mut cb: impl 'static + FnMut(char)) -> Option<Flow> {
+    fn check_escape(first: char, sp: usize, strs: *mut Vec<char>) -> Option<Flow> {
+        fn doesc(c: char) -> char {
+            match c {
+                '\\' | '"' | '/' => c,
+                'b' => '',
+                'f' => '',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                _ => panic!("never"),
+            }
+        }
         if first == '\\' {
             return move |inp, data: &mut TokenData, eof| -> Flow {
                 if bop!(|| inp; ==; '\\', '"', '/', 'b', 'f', 'n', 'r', 't') {
-                    cb(inp);
+                    unsafe { &mut *strs }.push(doesc(inp));
                     return RecunsFlow::End;
                 } else if inp == 'u' {
                     let mut uc = vec![];
@@ -156,9 +169,16 @@ mod token {
                             //todo error
                         }
                         uc.push(inp);
-                        todo!()
+                        if uc.len() == 4 {
+                            let s: String = uc.iter().collect();
+                            let hex: u32 = u32::from_str_radix(&*s, 16).unwrap();
+                            let c = std::char::from_u32(hex).unwrap();
+                            unsafe { &mut *strs }.push(c);
+                            return RecunsFlow::End;
+                        }
+                        RecunsFlow::None
                     }
-                    .rfcall_next();
+                    .rfmov_next();
                 } else {
                     //todo error
                 }
