@@ -55,7 +55,12 @@ mod token {
             r,
             true,
             &mut errors,
-            || code.next().map(|v| Ok(v)),
+            |d| {
+                code.next().map(|v| {
+                    d.index += 1;
+                    Ok(v)
+                })
+            },
             |d| {
                 if d.tokens.is_empty() {
                     return None;
@@ -109,11 +114,60 @@ mod token {
             }
             .rfcall_next()
             .into();
-        };
+        }
         None
     }
     fn check_string(first: char, sp: usize) -> Option<Flow> {
-        todo!()
+        if first == '"' {
+            let mut strs = vec![];
+            return move |inp, data: &mut TokenData, eof| -> Flow {
+                if eof || inp == '\0' {
+                    //todo error
+                }
+                //                  \b   \f
+                if bop!(|| inp; ==; '', '', '\n', '\r', '\t') {
+                    //todo error
+                }
+                if inp == '"' {
+                    //todo end
+                }
+                try_ret!(check_escape(inp, data.save(), {
+                    let strs: *mut Vec<char> = &mut strs;
+                    move |c| unsafe { &mut *strs }.push(c)
+                }));
+                strs.push(inp);
+                RecunsFlow::None
+            }
+            .rfcall_next()
+            .into();
+        }
+        None
+    }
+    fn check_escape(first: char, sp: usize, mut cb: impl 'static + FnMut(char)) -> Option<Flow> {
+        if first == '\\' {
+            return move |inp, data: &mut TokenData, eof| -> Flow {
+                if bop!(|| inp; ==; '\\', '"', '/', 'b', 'f', 'n', 'r', 't') {
+                    cb(inp);
+                    return RecunsFlow::End;
+                } else if inp == 'u' {
+                    let mut uc = vec![];
+                    return move |inp: char, data: &mut TokenData, eof| -> Flow {
+                        if !inp.is_ascii_hexdigit() {
+                            //todo error
+                        }
+                        uc.push(inp);
+                        todo!()
+                    }
+                    .rfcall_next();
+                } else {
+                    //todo error
+                }
+                RecunsFlow::None
+            }
+            .rfcall_next()
+            .into();
+        }
+        None
     }
     fn check_word(first: char, sp: usize) -> Option<Flow> {
         todo!()

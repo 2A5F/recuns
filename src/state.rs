@@ -109,26 +109,30 @@ fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I, eof: bo
     let r = s.states.last_mut()?;
     let r = r.check(input.clone(), &mut s.data, eof);
 
-    match r {
-        RecunsFlow::ReDo => s.queue.push(Box::new(move |this| {
+    #[inline(always)]
+    fn redo<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I, eof: bool) {
+        s.queue.push(Box::new(move |this| {
             call(this, input.clone(), eof);
-        })),
+        }));
+    }
+
+    match r {
         RecunsFlow::End => unsafe {
             s.pop();
         },
+        RecunsFlow::EndReDo => unsafe {
+            s.pop();
+            redo(s, input, eof);
+        },
         RecunsFlow::Call(f) => {
             s.push(f);
-            s.queue.push(Box::new(move |this| {
-                call(this, input.clone(), eof);
-            }))
+            redo(s, input, eof);
         }
         RecunsFlow::CallNext(f) => s.push(f),
         RecunsFlow::Mov(f) => unsafe {
             s.pop();
             s.push(f);
-            s.queue.push(Box::new(move |this| {
-                call(this, input.clone(), eof);
-            }))
+            redo(s, input, eof);
         },
         RecunsFlow::MovNext(f) => unsafe {
             s.pop();
@@ -165,7 +169,7 @@ macro_rules! do_loop {
                 break;
             }
 
-            let c = $next();
+            let c = $next(&mut $s.data);
             if c.is_none() {
                 finish = true;
                 let r = call(&mut $s, Default::default(), true);
@@ -198,7 +202,7 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
-    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+    mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut cancel: impl FnMut() -> bool,
     mut on_loop: impl FnMut(&mut State<I, D>),
 ) -> RecunsResultErrs<()> {
@@ -217,7 +221,7 @@ pub fn do_loop_on_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
-    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+    mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut on_loop: impl FnMut(&mut State<I, D>),
 ) -> RecunsResultErrs<()> {
     do_loop! {
@@ -232,7 +236,7 @@ pub fn do_loop_cancel<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
-    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+    mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut cancel: impl FnMut() -> bool,
 ) -> RecunsResultErrs<()> {
     do_loop! {
@@ -249,7 +253,7 @@ pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
-    mut next: impl FnMut() -> Option<RecunsResult<I>>,
+    mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
 ) -> RecunsResultErrs<()> {
     // do_loop! {
     //     s ;
@@ -270,7 +274,7 @@ pub fn do_loop<'a, I: Clone + Default + 'a, D>(
             break;
         }
 
-        let c = next();
+        let c = next(&mut s.data);
         if c.is_none() {
             finish = true;
             let r = call(&mut s, Default::default(), true);
@@ -304,7 +308,7 @@ pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     errors: &'a mut Vec<Arc<dyn Error>>,
-    mut next: impl 'a + FnMut() -> Option<RecunsResult<I>>,
+    mut next: impl 'a + FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut yields: impl 'a + FnMut(&mut D) -> Option<VecDeque<U>>,
 ) -> impl 'a + Iterator<Item = U> {
     let mut s: State<'_, '_, I, D> = State::new(stop_when_err, data, errors);
@@ -345,7 +349,7 @@ pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
                 break;
             }
 
-            let c = next();
+            let c = next(&mut s.data);
             if c.is_none() {
                 finish = true;
                 let r = call(&mut s, Default::default(), false);
@@ -531,3 +535,12 @@ impl<F> Debug for DoLoopIter<F> {
 //         None
 //     }
 // }
+
+#[macro_export]
+macro_rules! try_ret {
+    { $e:expr } => {
+        if let Some(v) = $e {
+            return v;
+        }
+    };
+}

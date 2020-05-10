@@ -25,7 +25,7 @@ pub type RecunsResultErrs<T> = Result<T, Vec<Arc<dyn Error>>>;
 pub enum RecunsFlow<I, D> {
     None,
     End,
-    ReDo,
+    EndReDo,
     Call(Box<dyn Recuns<Input = I, Data = D>>),
     CallNext(Box<dyn Recuns<Input = I, Data = D>>),
     Mov(Box<dyn Recuns<Input = I, Data = D>>),
