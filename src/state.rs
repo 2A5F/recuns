@@ -51,6 +51,7 @@ impl<'a, 'b, I, D> State<'a, 'b, I, D> {
     }
 }
 
+#[inline]
 fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I, eof: bool) -> Option<()> {
     let r = s.states.last_mut()?;
     let r = r.check(input.clone(), &mut s.data, eof);
@@ -144,6 +145,8 @@ macro_rules! do_loop {
         Ok(())
     };
 }
+
+#[inline]
 pub fn do_loop_cancel_on_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -163,6 +166,8 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + Default + 'a, D>(
         }
     }
 }
+
+#[inline]
 pub fn do_loop_on_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -178,6 +183,8 @@ pub fn do_loop_on_loop<'a, I: Clone + Default + 'a, D>(
         }
     }
 }
+
+#[inline]
 pub fn do_loop_cancel<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -195,6 +202,8 @@ pub fn do_loop_cancel<'a, I: Clone + Default + 'a, D>(
         }
     }
 }
+
+#[inline]
 pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -319,6 +328,8 @@ macro_rules! do_iter { //$($b;)?
         i
     };
 }
+
+#[inline]
 pub fn do_iter_cancel_on_loop<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -341,6 +352,7 @@ pub fn do_iter_cancel_on_loop<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     }
 }
 
+#[inline]
 pub fn do_iter_on_loop<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -359,6 +371,7 @@ pub fn do_iter_on_loop<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     }
 }
 
+#[inline]
 pub fn do_iter_cancel<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -379,6 +392,7 @@ pub fn do_iter_cancel<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     }
 }
 
+#[inline]
 pub fn do_iter<'a, I: Clone + Default + 'a, D: 'a, U: 'a>(
     data: D,
     root: impl Recuns<Data = D, Input = I> + 'a,
@@ -474,6 +488,8 @@ where
     F: FnMut() -> Option<U>,
 {
     type Item = U;
+
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         (self.f)()
     }
