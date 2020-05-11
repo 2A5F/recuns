@@ -42,8 +42,12 @@ mod token {
         Eof(usize),
         #[error("Special characters need to be escaped at {}..{}", .0, .0)]
         NeedEscape(usize),
-        #[error("Illegal Escape symbol {} at {}..{}", .0, .1, .1)]
+        #[error("Illegal Escape symbol '{}' at {}..{}", .0, .1, .1)]
         IllegalEscape(char, usize),
+        #[error("Unknown word \"{}\" at {}..{}", .0, .1.start, .1.end)]
+        UnknownWord(String, Range<usize>),
+        #[error( "Unknown character '{}' at {}..{}", .0, .1, .1)]
+        UnknownCharacter(char, usize),
     }
 
     struct TokenData {
@@ -60,7 +64,7 @@ mod token {
 
     #[test]
     fn test_tokens() {
-        let code = "\"asd\\";
+        let code = "{\"a\":true}";
         tokens(code.chars());
     }
     fn tokens(mut code: Chars) {
@@ -96,13 +100,15 @@ mod token {
 
     fn root(inp: char, data: &mut TokenData, eof: bool) -> Flow {
         if eof || inp == '\0' {
-            return RecunsFlow::End;
+            return Flow::End;
         }
         let sp = data.save();
         try_ret!(check_number(inp, sp));
         try_ret!(check_string(inp, sp));
-        //todo error
-        RecunsFlow::None
+        try_ret!(check_word(inp, sp));
+        try_ret!(check_space(inp, sp));
+        try_ret!(check_symbol(inp, data));
+        return Error::new(TokenError::UnknownCharacter(inp, sp)).into();
     }
 
     lazy_static! {
@@ -131,7 +137,7 @@ mod token {
                     match f {
                         Ok(f) => {
                             data.tokens.push(Token::Num(f));
-                            return RecunsFlow::EndReDo;
+                            return Flow::EndReDo;
                         }
                         Err(_) => {
                             let np = data.save();
@@ -140,7 +146,7 @@ mod token {
                     }
                 } else {
                     strs.push(inp);
-                    return RecunsFlow::None;
+                    return Flow::None;
                 }
             }
             .rfcall_next()
@@ -164,11 +170,11 @@ mod token {
                 if inp == '"' {
                     let s: String = strs.iter().collect();
                     data.tokens.push(Token::Str(s));
-                    return RecunsFlow::End;
+                    return Flow::End;
                 }
                 try_ret!(check_escape(inp, data.save(), &mut strs));
                 strs.push(inp);
-                RecunsFlow::None
+                Flow::None
             }
             .rfcall_next()
             .into();
@@ -196,7 +202,7 @@ mod token {
                 }
                 if bop!(|| inp; ==; '\\', '"', '/', 'b', 'f', 'n', 'r', 't') {
                     unsafe { &mut *strs }.push(doesc(inp));
-                    return RecunsFlow::End;
+                    return Flow::End;
                 } else if inp == 'u' {
                     let mut uc = vec![];
                     return move |inp: char, data: &mut TokenData, eof| -> Flow {
@@ -214,9 +220,9 @@ mod token {
                             let hex: u32 = u32::from_str_radix(&*s, 16).unwrap();
                             let c = std::char::from_u32(hex).unwrap();
                             unsafe { &mut *strs }.push(c);
-                            return RecunsFlow::End;
+                            return Flow::End;
                         }
-                        RecunsFlow::None
+                        Flow::None
                     }
                     .rfmov_next();
                 } else {
@@ -230,9 +236,61 @@ mod token {
         None
     }
     fn check_word(first: char, sp: usize) -> Option<Flow> {
-        todo!()
+        if first.is_alphanumeric() {
+            let mut ws = vec![first];
+            return move |inp: char, data: &mut TokenData, eof| -> Flow {
+                if eof || inp == '\0' || !inp.is_alphanumeric() {
+                    let s: String = ws.iter().collect();
+                    if s == "true" {
+                        data.tokens.push(Token::Bool(true));
+                    } else if s == "false" {
+                        data.tokens.push(Token::Bool(false));
+                    } else if s == "null" {
+                        data.tokens.push(Token::Null);
+                    } else {
+                        let np = data.save();
+                        return Error::new(TokenError::UnknownWord(s, sp..np)).into();
+                    }
+                    return Flow::EndReDo;
+                }
+                ws.push(inp);
+                Flow::None
+            }
+            .rfcall_next()
+            .into();
+        }
+        None
     }
-    fn check_symbol(first: char, sp: usize) -> Option<Flow> {
-        todo!()
+    #[inline]
+    fn check_symbol(first: char, data: &mut TokenData) -> Option<Flow> {
+        if first == ',' {
+            data.tokens.push(Token::Comma)
+        } else if first == ':' {
+            data.tokens.push(Token::Colon)
+        } else if first == '{' {
+            data.tokens.push(Token::ObjS)
+        } else if first == '}' {
+            data.tokens.push(Token::ObjE)
+        } else if first == '[' {
+            data.tokens.push(Token::ArrS)
+        } else if first == ']' {
+            data.tokens.push(Token::ArrE)
+        } else {
+            return None;
+        }
+        Some(Flow::None)
+    }
+    fn check_space(first: char, _: usize) -> Option<Flow> {
+        if first.is_whitespace() {
+            return move |inp: char, _: &mut TokenData, eof| -> Flow {
+                if eof || inp == '\0' || !inp.is_whitespace() {
+                    return Flow::EndReDo;
+                }
+                Flow::None
+            }
+            .rfcall_next()
+            .into();
+        }
+        None
     }
 }
