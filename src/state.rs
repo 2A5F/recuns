@@ -210,52 +210,52 @@ pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     stop_when_err: bool,
     mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
 ) -> RecunsResultErrs<Option<D>> {
-    // do_loop! {
-    //     s ;
-    //     data, root, stop_when_err, next ;
+    do_loop! {
+        s ;
+        data, root, stop_when_err, next ;
+    }
+    // let mut errors = vec![];
+    // let mut s: State<'_, '_, I, D> = State::new(stop_when_err, data, &mut errors);
+    // s.push(Box::new(root));
+    // let mut finish = false;
+    // loop {
+    //     if !s.queue.is_empty() {
+    //         let mut q = s.queue.pop().unwrap();
+    //         q(&mut s);
+    //         continue;
+    //     }
+
+    //     if finish {
+    //         break;
+    //     }
+
+    //     let c = next(&mut s.data);
+    //     if c.is_none() {
+    //         finish = true;
+    //         let r = call(&mut s, Default::default(), true);
+    //         if r.is_none() {
+    //             break;
+    //         }
+    //         continue;
+    //     }
+    //     let c: RecunsResult<I> = c.unwrap();
+    //     let c = match c {
+    //         Ok(c) => c,
+    //         Err(err) => {
+    //             s.errors.push(err);
+    //             return Err(s.errors.clone());
+    //         }
+    //     };
+
+    //     let r = call(&mut s, c, false);
+    //     if r.is_none() {
+    //         break;
+    //     }
     // }
-    let mut errors = vec![];
-    let mut s: State<'_, '_, I, D> = State::new(stop_when_err, data, &mut errors);
-    s.push(Box::new(root));
-    let mut finish = false;
-    loop {
-        if !s.queue.is_empty() {
-            let mut q = s.queue.pop().unwrap();
-            q(&mut s);
-            continue;
-        }
-
-        if finish {
-            break;
-        }
-
-        let c = next(&mut s.data);
-        if c.is_none() {
-            finish = true;
-            let r = call(&mut s, Default::default(), true);
-            if r.is_none() {
-                break;
-            }
-            continue;
-        }
-        let c: RecunsResult<I> = c.unwrap();
-        let c = match c {
-            Ok(c) => c,
-            Err(err) => {
-                s.errors.push(err);
-                return Err(s.errors.clone());
-            }
-        };
-
-        let r = call(&mut s, c, false);
-        if r.is_none() {
-            break;
-        }
-    }
-    if !s.errors.is_empty() {
-        return Err(s.errors.clone());
-    }
-    Ok(Some(s.data))
+    // if !s.errors.is_empty() {
+    //     return Err(s.errors.clone());
+    // }
+    // Ok(Some(s.data))
 }
 
 macro_rules! do_iter { //$($b;)?
