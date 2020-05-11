@@ -1,11 +1,14 @@
 // #![allow(unused_variables, unused_mut, unused_imports, dead_code)]
 use crate::*;
 
+static CODE: &'static str =
+    "{ \"a\": 1, \"b\": true, \"c\": [null, 1.5, false], \"d\": { \"v\": \"asd\" } }";
+
 fn json() {}
 
 mod token {
     #![allow(non_upper_case_globals)]
-    use crate::*;
+    use super::*;
     use anyhow::Error;
     use batch_oper::*;
     use lazy_static::*;
@@ -22,15 +25,21 @@ mod token {
         Num(f64),
         Bool(bool),
         Null,
+        /// `[`
         ArrS,
+        /// `]`
         ArrE,
+        /// `{`
         ObjS,
+        /// `}`
         ObjE,
+        /// `,`
         Comma,
+        /// `:`
         Colon,
     }
 
-    #[derive(Error, Debug)]
+    #[derive(Error, Debug, PartialEq, Eq)]
     enum TokenError {
         #[error("Token is not a legal number at {}..{}", .0.start, .0.end)]
         NotNum(Range<usize>),
@@ -64,10 +73,43 @@ mod token {
 
     #[test]
     fn test_tokens() {
-        let code = "{\"a\":true}";
-        tokens(code.chars());
+        let r = tokens(CODE.chars());
+        println!("{:?}", r);
+        let r = r.unwrap();
+        assert_eq!(
+            r,
+            vec![
+                Token::ObjS,
+                Token::Str("a".into()),
+                Token::Colon,
+                Token::Num(1.0),
+                Token::Comma,
+                Token::Str("b".into()),
+                Token::Colon,
+                Token::Bool(true),
+                Token::Comma,
+                Token::Str("c".into()),
+                Token::Colon,
+                Token::ArrS,
+                Token::Null,
+                Token::Comma,
+                Token::Num(1.5),
+                Token::Comma,
+                Token::Bool(false),
+                Token::ArrE,
+                Token::Comma,
+                Token::Str("d".into()),
+                Token::Colon,
+                Token::ObjS,
+                Token::Str("v".into()),
+                Token::Colon,
+                Token::Str("asd".into()),
+                Token::ObjE,
+                Token::ObjE
+            ]
+        );
     }
-    fn tokens(mut code: Chars) {
+    fn tokens(mut code: Chars) -> Result<Vec<Token>, Vec<Arc<Error>>> {
         let mut errors = vec![];
         let r = root.recuns();
         let r = do_iter(
@@ -94,8 +136,11 @@ mod token {
             },
         );
         let r = r.collect::<Vec<_>>();
-        println!("{:?}", r);
-        println!("{:?}", errors);
+        if errors.is_empty() {
+            Ok(r)
+        } else {
+            Err(errors)
+        }
     }
 
     fn root(inp: char, data: &mut TokenData, eof: bool) -> Flow {
