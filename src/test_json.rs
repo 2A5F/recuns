@@ -5,12 +5,11 @@ use batch_oper::*;
 use lazy_static::*;
 use std::collections::BTreeMap;
 use std::ops::*;
-use std::str::*;
 use thiserror::*;
 use token::*;
 
 static CODE: &'static str =
-    "{ \"a\": 1, \"b\": true, \"c\": [null, 1.5, false], \"d\": { \"v\": \"asd\" } }";
+    r#"{ "a": 1, "b": true, "c": [null, 1.5, false], "d": { "v": "asd" } }"#;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum JsonValue {
@@ -20,6 +19,16 @@ pub enum JsonValue {
     Str(String),
     Arr(Vec<JsonValue>),
     Obj(BTreeMap<String, JsonValue>),
+}
+
+#[derive(Error, Debug, PartialEq)]
+pub enum JsonParserError {
+    #[error("Need <{}> but find EOF", .0)]
+    NeedButEof(String),
+    #[error("Excess Token <{}>", .0)]
+    ExcessToken(Token),
+    #[error("Need <{}> but find <{}>", .0, .1)]
+    NeedBut(String, Token),
 }
 
 #[derive(Debug)]
@@ -33,13 +42,39 @@ type Flow = RecunsFlow<Token, ParserData>;
 fn test_json() {
     let r = json(CODE.chars());
     println!("{:?}", r);
+    let r = r.unwrap();
+    assert_eq!(
+        r,
+        Some(JsonValue::Obj({
+            let mut m = BTreeMap::new();
+            m.insert("a".into(), JsonValue::Num(1.0));
+            m.insert("b".into(), JsonValue::Bool(true));
+            m.insert(
+                "c".into(),
+                JsonValue::Arr(vec![
+                    JsonValue::Null,
+                    JsonValue::Num(1.5),
+                    JsonValue::Bool(false),
+                ]),
+            );
+            m.insert(
+                "d".into(),
+                JsonValue::Obj({
+                    let mut m = BTreeMap::new();
+                    m.insert("v".into(), JsonValue::Str("asd".into()));
+                    m
+                }),
+            );
+            m
+        }))
+    )
 }
 
-fn json(code: impl Iterator<Item = char>) -> Result<Option<JsonValue>, Vec<Arc<Error>>> {
+pub fn json(code: impl Iterator<Item = char>) -> Result<Option<JsonValue>, Vec<Arc<Error>>> {
     let tokens = tokens(code)?;
     let mut tokens = tokens.iter();
     let r = root.recuns();
-    let r = do_loop(ParserData { out: None }, r, false, |_| {
+    let r = do_loop(ParserData { out: None }, r, true, |_| {
         tokens.next().map(|v| Ok(v.clone()))
     })?;
     Ok(r.unwrap().out)
@@ -50,7 +85,7 @@ fn root(inp: Token, data: &mut ParserData, eof: bool) -> Flow {
         return Flow::End;
     }
     if data.out.is_some() {
-        //todo error
+        return Error::new(JsonParserError::ExcessToken(inp)).into();
     }
     let data: *mut ParserData = data;
     check_value(&inp, Box::new(move |v| unsafe { &mut *data }.out = Some(v)))
@@ -58,44 +93,45 @@ fn root(inp: Token, data: &mut ParserData, eof: bool) -> Flow {
 fn check_value(inp: &Token, mut cb: Box<dyn FnMut(JsonValue)>) -> Flow {
     try_ret!(check_literal(inp, |v| cb(v)));
     if let Some(f) = check_arr(inp) {
-        return f(Box::new(move |v| cb(v)));
+        let r = f(Box::new(move |v| cb(v)));
+        return r;
     }
     if let Some(f) = check_obj(inp) {
-        return f(Box::new(move |v| cb(v)));
+        let r = f(Box::new(move |v| cb(v)));
+        return r;
     }
-    todo!()
-    //todo error
+    return Error::new(JsonParserError::NeedBut("value".into(), inp.clone())).into();
 }
 fn check_literal(inp: &Token, mut cb: impl FnMut(JsonValue)) -> Option<Flow> {
     match inp {
-        Token::Str(s) => cb(JsonValue::Str(s.clone())),
-        &Token::Num(n) => cb(JsonValue::Num(n)),
-        &Token::Bool(b) => cb(JsonValue::Bool(b)),
-        Token::Null => cb(JsonValue::Null),
+        Token::Str(s, _) => cb(JsonValue::Str(s.clone())),
+        &Token::Num(n, _) => cb(JsonValue::Num(n)),
+        &Token::Bool(b, _) => cb(JsonValue::Bool(b)),
+        Token::Null(_) => cb(JsonValue::Null),
         _ => return None,
     }
-    Some(Flow::End)
+    Some(Flow::None)
 }
 #[inline]
 fn check_arr(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Flow> {
-    if let Token::ArrS = inp {
+    if let Token::ArrS(_) = inp {
         return Some(|mut cb: Box<dyn FnMut(JsonValue)>| {
             let mut vals = vec![];
             let mut split = false;
             return move |inp: Token, _: &mut ParserData, eof: bool| -> Flow {
                 if eof {
-                    //todo error
+                    return Error::new(JsonParserError::NeedButEof("]".into())).into();
                 }
-                if let Token::ArrE = inp {
+                if let Token::ArrE(_) = inp {
                     cb(JsonValue::Arr(std::mem::replace(&mut vals, vec![])));
                     return Flow::End;
                 }
                 if split {
                     split = false;
-                    if let Token::Comma = inp {
+                    if let Token::Comma(_) = inp {
                         return Flow::None;
                     } else {
-                        //todo error
+                        return Error::new(JsonParserError::NeedBut(",".into(), inp)).into();
                     }
                 } else {
                     let vals: *mut Vec<JsonValue> = &mut vals;
@@ -111,14 +147,14 @@ fn check_arr(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Fl
 
                 Flow::None
             }
-            .rfcall_next();
+            .rfcall_next("check_arr");
         });
     }
     None
 }
 #[inline]
 fn check_obj(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Flow> {
-    if let Token::ObjS = inp {
+    if let Token::ObjS(_) = inp {
         return Some(|mut cb: Box<dyn FnMut(JsonValue)>| {
             enum Need {
                 Key,
@@ -131,9 +167,15 @@ fn check_obj(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Fl
             let mut need = Need::Key;
             return move |inp: Token, _: &mut ParserData, eof: bool| -> Flow {
                 if eof {
-                    //todo error
+                    return match need {
+                        Need::Colon => Error::new(JsonParserError::NeedButEof(":".into())).into(),
+                        Need::Value => {
+                            Error::new(JsonParserError::NeedButEof("value".into())).into()
+                        }
+                        _ => Error::new(JsonParserError::NeedButEof("]".into())).into(),
+                    };
                 }
-                if let Token::ObjE = inp {
+                if let Token::ObjE(_) = inp {
                     cb(JsonValue::Obj(std::mem::replace(
                         &mut vals,
                         BTreeMap::new(),
@@ -142,25 +184,25 @@ fn check_obj(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Fl
                 }
                 match need {
                     Need::Key => {
-                        if let Token::Str(k) = inp {
+                        if let Token::Str(k, _) = inp {
                             key = Some(k);
                             need = Need::Colon;
                         } else {
-                            //todo error
+                            return Error::new(JsonParserError::NeedBut("key".into(), inp)).into();
                         }
                     }
                     Need::Colon => {
-                        if let Token::Colon = inp {
+                        if let Token::Colon(_) = inp {
                             need = Need::Value;
                         } else {
-                            //todo error
+                            return Error::new(JsonParserError::NeedBut(":".into(), inp)).into();
                         }
                     }
                     Need::Value => {
                         let vals: *mut _ = &mut vals;
                         let key: *mut _ = &mut key;
                         let need: *mut _ = &mut need;
-                        check_value(
+                        return check_value(
                             &inp,
                             Box::new(move |v| unsafe {
                                 let k = std::mem::replace(&mut *key, None).unwrap();
@@ -170,16 +212,16 @@ fn check_obj(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Fl
                         );
                     }
                     Need::Comma => {
-                        if let Token::Comma = inp {
+                        if let Token::Comma(_) = inp {
                             need = Need::Key;
                         } else {
-                            //todo error
+                            return Error::new(JsonParserError::NeedBut(",".into(), inp)).into();
                         }
                     }
                 }
                 Flow::None
             }
-            .rfcall_next();
+            .rfcall_next("check_obj");
         });
     }
     None
@@ -196,26 +238,43 @@ mod token {
     #[derive(Debug, Clone, PartialEq)]
     pub enum Token {
         None,
-        Str(String),
-        Num(f64),
-        Bool(bool),
-        Null,
+        Str(String, Range<usize>),
+        Num(f64, Range<usize>),
+        Bool(bool, Range<usize>),
+        Null(Range<usize>),
         /// `[`
-        ArrS,
+        ArrS(Range<usize>),
         /// `]`
-        ArrE,
+        ArrE(Range<usize>),
         /// `{`
-        ObjS,
+        ObjS(Range<usize>),
         /// `}`
-        ObjE,
+        ObjE(Range<usize>),
         /// `,`
-        Comma,
+        Comma(Range<usize>),
         /// `:`
-        Colon,
+        Colon(Range<usize>),
     }
     impl Default for Token {
         fn default() -> Self {
             Self::None
+        }
+    }
+    impl std::fmt::Display for Token {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Token::None => write!(f, "None"),
+                Token::Str(s, r) => write!(f, "Str({}) at {}..{}", s, r.start, r.end),
+                Token::Num(n, r) => write!(f, "Num({}) at {}..{}", n, r.start, r.end),
+                Token::Bool(b, r) => write!(f, "Bool({}) at {}..{}", b, r.start, r.end),
+                Token::Null(r) => write!(f, "Null(null) at {}..{}", r.start, r.end),
+                Token::ArrS(r) => write!(f, "ArrS('[') at {}..{}", r.start, r.end),
+                Token::ArrE(r) => write!(f, "ArrE(']') at {}..{}", r.start, r.end),
+                Token::ObjS(r) => write!(f, "ObjS('{{') at {}..{}", r.start, r.end),
+                Token::ObjE(r) => write!(f, "ObjE('}}') at {}..{}", r.start, r.end),
+                Token::Comma(r) => write!(f, "Comma(',') at {}..{}", r.start, r.end),
+                Token::Colon(r) => write!(f, "Colon(':') at {}..{}", r.start, r.end),
+            }
         }
     }
 
@@ -260,33 +319,33 @@ mod token {
         assert_eq!(
             r,
             vec![
-                Token::ObjS,
-                Token::Str("a".into()),
-                Token::Colon,
-                Token::Num(1.0),
-                Token::Comma,
-                Token::Str("b".into()),
-                Token::Colon,
-                Token::Bool(true),
-                Token::Comma,
-                Token::Str("c".into()),
-                Token::Colon,
-                Token::ArrS,
-                Token::Null,
-                Token::Comma,
-                Token::Num(1.5),
-                Token::Comma,
-                Token::Bool(false),
-                Token::ArrE,
-                Token::Comma,
-                Token::Str("d".into()),
-                Token::Colon,
-                Token::ObjS,
-                Token::Str("v".into()),
-                Token::Colon,
-                Token::Str("asd".into()),
-                Token::ObjE,
-                Token::ObjE
+                Token::ObjS(1..1),
+                Token::Str("a".into(), 3..5),
+                Token::Colon(6..6),
+                Token::Num(1.0, 8..8),
+                Token::Comma(9..9),
+                Token::Str("b".into(), 11..13),
+                Token::Colon(14..14),
+                Token::Bool(true, 16..19),
+                Token::Comma(20..20),
+                Token::Str("c".into(), 22..24),
+                Token::Colon(25..25),
+                Token::ArrS(27..27),
+                Token::Null(28..31),
+                Token::Comma(32..32),
+                Token::Num(1.5, 34..36),
+                Token::Comma(37..37),
+                Token::Bool(false, 39..43),
+                Token::ArrE(44..44),
+                Token::Comma(45..45),
+                Token::Str("d".into(), 47..49),
+                Token::Colon(50..50),
+                Token::ObjS(52..52),
+                Token::Str("v".into(), 54..56),
+                Token::Colon(57..57),
+                Token::Str("asd".into(), 59..63),
+                Token::ObjE(65..65),
+                Token::ObjE(67..67)
             ]
         );
     }
@@ -334,7 +393,7 @@ mod token {
         try_ret!(check_string(inp, sp));
         try_ret!(check_word(inp, sp));
         try_ret!(check_space(inp, sp));
-        try_ret!(check_symbol(inp, data));
+        try_ret!(check_symbol(inp, data, sp));
         return Error::new(TokenError::UnknownCharacter(inp, sp)).into();
     }
 
@@ -356,18 +415,17 @@ mod token {
             return move |inp, data: &mut TokenData, eof| -> Flow {
                 if eof || inp == '\0' || !is_num(inp) {
                     let s = strs.iter().collect::<String>();
+                    let np = data.save() - 1;
                     if !number_regex.is_match(&*s) {
-                        let np = data.save();
                         return Error::new(TokenError::NotNum(sp..np)).into();
                     }
                     let f = s.parse::<f64>();
                     match f {
                         Ok(f) => {
-                            data.tokens.push(Token::Num(f));
+                            data.tokens.push(Token::Num(f, sp..np));
                             return Flow::EndReDo;
                         }
                         Err(_) => {
-                            let np = data.save();
                             return Error::new(TokenError::NotNum(sp..np)).into();
                         }
                     }
@@ -376,12 +434,12 @@ mod token {
                     return Flow::None;
                 }
             }
-            .rfcall_next()
+            .rfcall_next("check_number")
             .into();
         }
         None
     }
-    fn check_string(first: char, _: usize) -> Option<Flow> {
+    fn check_string(first: char, sp: usize) -> Option<Flow> {
         if first == '"' {
             let mut strs = vec![];
             return move |inp, data: &mut TokenData, eof| -> Flow {
@@ -396,14 +454,15 @@ mod token {
                 }
                 if inp == '"' {
                     let s: String = strs.iter().collect();
-                    data.tokens.push(Token::Str(s));
+                    let np = data.save();
+                    data.tokens.push(Token::Str(s, sp..np));
                     return Flow::End;
                 }
                 try_ret!(check_escape(inp, data.save(), &mut strs));
                 strs.push(inp);
                 Flow::None
             }
-            .rfcall_next()
+            .rfcall_next("check_string")
             .into();
         }
         None
@@ -451,13 +510,13 @@ mod token {
                         }
                         Flow::None
                     }
-                    .rfmov_next();
+                    .rfmov_next("check_escape_unicode".into());
                 } else {
                     let np = data.save();
                     return Error::new(TokenError::IllegalEscape(inp, np)).into();
                 }
             }
-            .rfcall_next()
+            .rfcall_next("check_escape")
             .into();
         }
         None
@@ -468,14 +527,14 @@ mod token {
             return move |inp: char, data: &mut TokenData, eof| -> Flow {
                 if eof || inp == '\0' || !inp.is_alphanumeric() {
                     let s: String = ws.iter().collect();
+                    let np = data.save() - 1;
                     if s == "true" {
-                        data.tokens.push(Token::Bool(true));
+                        data.tokens.push(Token::Bool(true, sp..np));
                     } else if s == "false" {
-                        data.tokens.push(Token::Bool(false));
+                        data.tokens.push(Token::Bool(false, sp..np));
                     } else if s == "null" {
-                        data.tokens.push(Token::Null);
+                        data.tokens.push(Token::Null(sp..np));
                     } else {
-                        let np = data.save();
                         return Error::new(TokenError::UnknownWord(s, sp..np)).into();
                     }
                     return Flow::EndReDo;
@@ -483,25 +542,26 @@ mod token {
                 ws.push(inp);
                 Flow::None
             }
-            .rfcall_next()
+            .rfcall_next("check_word")
             .into();
         }
         None
     }
     #[inline]
-    fn check_symbol(first: char, data: &mut TokenData) -> Option<Flow> {
+    fn check_symbol(first: char, data: &mut TokenData, sp: usize) -> Option<Flow> {
+        let np = data.save();
         if first == ',' {
-            data.tokens.push(Token::Comma)
+            data.tokens.push(Token::Comma(sp..np))
         } else if first == ':' {
-            data.tokens.push(Token::Colon)
+            data.tokens.push(Token::Colon(sp..np))
         } else if first == '{' {
-            data.tokens.push(Token::ObjS)
+            data.tokens.push(Token::ObjS(sp..np))
         } else if first == '}' {
-            data.tokens.push(Token::ObjE)
+            data.tokens.push(Token::ObjE(sp..np))
         } else if first == '[' {
-            data.tokens.push(Token::ArrS)
+            data.tokens.push(Token::ArrS(sp..np))
         } else if first == ']' {
-            data.tokens.push(Token::ArrE)
+            data.tokens.push(Token::ArrE(sp..np))
         } else {
             return None;
         }
@@ -515,7 +575,7 @@ mod token {
                 }
                 Flow::None
             }
-            .rfcall_next()
+            .rfcall_next("check_space")
             .into();
         }
         None

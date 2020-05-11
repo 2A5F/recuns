@@ -71,17 +71,17 @@ fn call<'a, 'b, I: Clone + 'a, D>(s: &mut State<'a, 'b, I, D>, input: I, eof: bo
             s.pop();
             redo(s, input, eof);
         },
-        RecunsFlow::Call(f) => {
+        RecunsFlow::Call(f, _) => {
             s.push(f);
             redo(s, input, eof);
         }
-        RecunsFlow::CallNext(f) => s.push(f),
-        RecunsFlow::Mov(f) => unsafe {
+        RecunsFlow::CallNext(f, _) => s.push(f),
+        RecunsFlow::Mov(f, _) => unsafe {
             s.pop();
             s.push(f);
             redo(s, input, eof);
         },
-        RecunsFlow::MovNext(f) => unsafe {
+        RecunsFlow::MovNext(f, _) => unsafe {
             s.pop();
             s.push(f);
         },
