@@ -1,26 +1,29 @@
 // #![allow(unused_variables, unused_mut, unused_imports, dead_code)]
 use crate::*;
+use anyhow::Error;
+use batch_oper::*;
+use lazy_static::*;
+use std::ops::*;
+use thiserror::*;
 
 static CODE: &'static str =
     "{ \"a\": 1, \"b\": true, \"c\": [null, 1.5, false], \"d\": { \"v\": \"asd\" } }";
 
 fn json() {}
 
+fn root() {}
+
 mod token {
     #![allow(non_upper_case_globals)]
     use super::*;
     use anyhow::Error;
-    use batch_oper::*;
-    use lazy_static::*;
     use regex::*;
     use std::collections::VecDeque;
     use std::iter::FromIterator;
-    use std::ops::*;
     use std::str::*;
-    use thiserror::*;
 
     #[derive(Debug, Clone, PartialEq)]
-    enum Token {
+    pub enum Token {
         Str(String),
         Num(f64),
         Bool(bool),
@@ -40,7 +43,7 @@ mod token {
     }
 
     #[derive(Error, Debug, PartialEq, Eq)]
-    enum TokenError {
+    pub enum TokenError {
         #[error("Token is not a legal number at {}..{}", .0.start, .0.end)]
         NotNum(Range<usize>),
         #[error("Need '{}' but find EOF at {}..{}", .0, .1, .1)]
@@ -109,7 +112,7 @@ mod token {
             ]
         );
     }
-    fn tokens(mut code: Chars) -> Result<Vec<Token>, Vec<Arc<Error>>> {
+    pub fn tokens(mut code: Chars) -> Result<Vec<Token>, Vec<Arc<Error>>> {
         let mut errors = vec![];
         let r = root.recuns();
         let r = do_iter(
