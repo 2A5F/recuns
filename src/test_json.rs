@@ -70,6 +70,20 @@ fn test_json() {
     )
 }
 
+#[test]
+fn test_bench() {
+    use easybench::bench;
+    use serde_json::Value;
+
+    println!("this: {}", bench(|| {
+        json(CODE.chars())
+    }));
+
+    println!("serde: {}", bench(|| {
+        serde_json::from_str::<Value>(CODE)
+    }));
+}
+
 pub fn json(code: impl Iterator<Item = char>) -> Result<Option<JsonValue>, Vec<Arc<Error>>> {
     let tokens = tokens(code)?;
     let mut tokens = tokens.iter();
