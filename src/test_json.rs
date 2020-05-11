@@ -3,15 +3,187 @@ use crate::*;
 use anyhow::Error;
 use batch_oper::*;
 use lazy_static::*;
+use std::collections::BTreeMap;
 use std::ops::*;
+use std::str::*;
 use thiserror::*;
+use token::*;
 
 static CODE: &'static str =
     "{ \"a\": 1, \"b\": true, \"c\": [null, 1.5, false], \"d\": { \"v\": \"asd\" } }";
 
-fn json() {}
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum JsonValue {
+    Null,
+    Bool(bool),
+    Num(f64),
+    Str(String),
+    Arr(Vec<JsonValue>),
+    Obj(BTreeMap<String, JsonValue>),
+}
 
-fn root() {}
+#[derive(Debug)]
+struct ParserData {
+    out: Option<JsonValue>,
+}
+
+type Flow = RecunsFlow<Token, ParserData>;
+
+#[test]
+fn test_json() {
+    let r = json(CODE.chars());
+    println!("{:?}", r);
+}
+
+fn json(code: impl Iterator<Item = char>) -> Result<Option<JsonValue>, Vec<Arc<Error>>> {
+    let tokens = tokens(code)?;
+    let mut tokens = tokens.iter();
+    let r = root.recuns();
+    let r = do_loop(ParserData { out: None }, r, false, |_| {
+        tokens.next().map(|v| Ok(v.clone()))
+    })?;
+    Ok(r.unwrap().out)
+}
+
+fn root(inp: Token, data: &mut ParserData, eof: bool) -> Flow {
+    if eof {
+        return Flow::End;
+    }
+    if data.out.is_some() {
+        //todo error
+    }
+    let data: *mut ParserData = data;
+    check_value(&inp, Box::new(move |v| unsafe { &mut *data }.out = Some(v)))
+}
+fn check_value(inp: &Token, mut cb: Box<dyn FnMut(JsonValue)>) -> Flow {
+    try_ret!(check_literal(inp, |v| cb(v)));
+    if let Some(f) = check_arr(inp) {
+        return f(Box::new(move |v| cb(v)));
+    }
+    if let Some(f) = check_obj(inp) {
+        return f(Box::new(move |v| cb(v)));
+    }
+    todo!()
+    //todo error
+}
+fn check_literal(inp: &Token, mut cb: impl FnMut(JsonValue)) -> Option<Flow> {
+    match inp {
+        Token::Str(s) => cb(JsonValue::Str(s.clone())),
+        &Token::Num(n) => cb(JsonValue::Num(n)),
+        &Token::Bool(b) => cb(JsonValue::Bool(b)),
+        Token::Null => cb(JsonValue::Null),
+        _ => return None,
+    }
+    Some(Flow::End)
+}
+#[inline]
+fn check_arr(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Flow> {
+    if let Token::ArrS = inp {
+        return Some(|mut cb: Box<dyn FnMut(JsonValue)>| {
+            let mut vals = vec![];
+            let mut split = false;
+            return move |inp: Token, _: &mut ParserData, eof: bool| -> Flow {
+                if eof {
+                    //todo error
+                }
+                if let Token::ArrE = inp {
+                    cb(JsonValue::Arr(std::mem::replace(&mut vals, vec![])));
+                    return Flow::End;
+                }
+                if split {
+                    split = false;
+                    if let Token::Comma = inp {
+                        return Flow::None;
+                    } else {
+                        //todo error
+                    }
+                } else {
+                    let vals: *mut Vec<JsonValue> = &mut vals;
+                    let split: *mut bool = &mut split;
+                    check_value(
+                        &inp,
+                        Box::new(move |v| unsafe {
+                            (&mut *vals).push(v);
+                            *split = true;
+                        }),
+                    );
+                }
+
+                Flow::None
+            }
+            .rfcall_next();
+        });
+    }
+    None
+}
+#[inline]
+fn check_obj(inp: &Token) -> Option<impl FnOnce(Box<dyn FnMut(JsonValue)>) -> Flow> {
+    if let Token::ObjS = inp {
+        return Some(|mut cb: Box<dyn FnMut(JsonValue)>| {
+            enum Need {
+                Key,
+                Colon,
+                Value,
+                Comma,
+            }
+            let mut vals = BTreeMap::new();
+            let mut key = None;
+            let mut need = Need::Key;
+            return move |inp: Token, _: &mut ParserData, eof: bool| -> Flow {
+                if eof {
+                    //todo error
+                }
+                if let Token::ObjE = inp {
+                    cb(JsonValue::Obj(std::mem::replace(
+                        &mut vals,
+                        BTreeMap::new(),
+                    )));
+                    return Flow::End;
+                }
+                match need {
+                    Need::Key => {
+                        if let Token::Str(k) = inp {
+                            key = Some(k);
+                            need = Need::Colon;
+                        } else {
+                            //todo error
+                        }
+                    }
+                    Need::Colon => {
+                        if let Token::Colon = inp {
+                            need = Need::Value;
+                        } else {
+                            //todo error
+                        }
+                    }
+                    Need::Value => {
+                        let vals: *mut _ = &mut vals;
+                        let key: *mut _ = &mut key;
+                        let need: *mut _ = &mut need;
+                        check_value(
+                            &inp,
+                            Box::new(move |v| unsafe {
+                                let k = std::mem::replace(&mut *key, None).unwrap();
+                                (&mut *vals).insert(k, v);
+                                *need = Need::Comma;
+                            }),
+                        );
+                    }
+                    Need::Comma => {
+                        if let Token::Comma = inp {
+                            need = Need::Key;
+                        } else {
+                            //todo error
+                        }
+                    }
+                }
+                Flow::None
+            }
+            .rfcall_next();
+        });
+    }
+    None
+}
 
 mod token {
     #![allow(non_upper_case_globals)]
@@ -20,10 +192,10 @@ mod token {
     use regex::*;
     use std::collections::VecDeque;
     use std::iter::FromIterator;
-    use std::str::*;
 
     #[derive(Debug, Clone, PartialEq)]
     pub enum Token {
+        None,
         Str(String),
         Num(f64),
         Bool(bool),
@@ -40,6 +212,11 @@ mod token {
         Comma,
         /// `:`
         Colon,
+    }
+    impl Default for Token {
+        fn default() -> Self {
+            Self::None
+        }
     }
 
     #[derive(Error, Debug, PartialEq, Eq)]
@@ -62,6 +239,7 @@ mod token {
         UnknownCharacter(char, usize),
     }
 
+    #[derive(Debug)]
     struct TokenData {
         index: usize,
         tokens: Vec<Token>,
@@ -112,7 +290,8 @@ mod token {
             ]
         );
     }
-    pub fn tokens(mut code: Chars) -> Result<Vec<Token>, Vec<Arc<Error>>> {
+
+    pub fn tokens(mut code: impl Iterator<Item = char>) -> Result<Vec<Token>, Vec<Arc<Error>>> {
         let mut errors = vec![];
         let r = root.recuns();
         let r = do_iter(

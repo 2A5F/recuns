@@ -142,7 +142,7 @@ macro_rules! do_loop {
         if !$s.errors.is_empty() {
             return Err($s.errors.clone());
         }
-        Ok(())
+        Ok(Some($s.data))
     };
 }
 
@@ -154,13 +154,13 @@ pub fn do_loop_cancel_on_loop<'a, I: Clone + Default + 'a, D>(
     mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut cancel: impl FnMut() -> bool,
     mut on_loop: impl FnMut(&mut State<I, D>),
-) -> RecunsResultErrs<()> {
+) -> RecunsResultErrs<Option<D>> {
     do_loop! {
         s ;
         data, root, stop_when_err, next ;
         {
             if cancel() {
-                return Ok(());
+                return Ok(None);
             }
             on_loop(&mut s);
         }
@@ -174,7 +174,7 @@ pub fn do_loop_on_loop<'a, I: Clone + Default + 'a, D>(
     stop_when_err: bool,
     mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut on_loop: impl FnMut(&mut State<I, D>),
-) -> RecunsResultErrs<()> {
+) -> RecunsResultErrs<Option<D>> {
     do_loop! {
         s ;
         data, root, stop_when_err, next ;
@@ -191,13 +191,13 @@ pub fn do_loop_cancel<'a, I: Clone + Default + 'a, D>(
     stop_when_err: bool,
     mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
     mut cancel: impl FnMut() -> bool,
-) -> RecunsResultErrs<()> {
+) -> RecunsResultErrs<Option<D>> {
     do_loop! {
         s ;
         data, root, stop_when_err, next ;
         {
             if cancel() {
-                return Ok(());
+                return Ok(None);
             }
         }
     }
@@ -209,7 +209,7 @@ pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     root: impl Recuns<Data = D, Input = I> + 'a,
     stop_when_err: bool,
     mut next: impl FnMut(&mut D) -> Option<RecunsResult<I>>,
-) -> RecunsResultErrs<()> {
+) -> RecunsResultErrs<Option<D>> {
     // do_loop! {
     //     s ;
     //     data, root, stop_when_err, next ;
@@ -255,7 +255,7 @@ pub fn do_loop<'a, I: Clone + Default + 'a, D>(
     if !s.errors.is_empty() {
         return Err(s.errors.clone());
     }
-    Ok(())
+    Ok(Some(s.data))
 }
 
 macro_rules! do_iter { //$($b;)?
